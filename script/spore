@@ -1,0 +1,140 @@
+#!/usr/bin/perl
+
+use 5.010001;
+use strict;
+use warnings;
+
+use File::Spec;
+use Net::HTTP::Spore;
+use JSON;
+
+use ARGV::ENV 'SPORE_OPTS';
+use Getopt::Long qw<:config require_order auto_version>;
+
+
+sub method_to_getopt
+{
+    my $method_spec = shift;
+    my (%req, %opt, %flags);
+    my %lists = (
+	required => \%req,
+	optional => \%opt,
+    );
+    while (my ($name, $vals) = each %lists) {
+	next unless defined(my $params = $method_spec->{"${name}_params"});
+	foreach my $p (@$params) {
+	    $vals->{$p} = undef;
+	    $flags{"$p=s"} = \($vals->{$p});
+	}
+    }
+    return \%req, \%opt, \%flags
+}
+
+my %OUTPUT_FORMATS = (
+    YAML => sub { require YAML::Tiny; YAML::Tiny::Dump(shift) },
+    JSON => sub { JSON->new->pretty->encode(shift) },
+);
+
+
+
+my $output_format = 'YAML';  # Human readable by default
+my ($use_cache, @spore_options, @middlewares);
+
+# Parse global options
+GetOptions(
+    'b|base-url' => sub { push @spore_options, base_url => $_[1] },
+    'json' => sub { $output_format = 'JSON' },
+    'yaml' => sub { $output_format = 'YAML' },
+    #'xml' => sub { $output_format = 'XML' },
+    'F|format' => \$output_format,
+    #'c|cache' => \$use_cache,
+) && @ARGV or do {
+    require Pod::Usage;
+    Pod::Usage::pod2usage(1);
+};
+
+die "invalid format '$output_format'" unless exists $OUTPUT_FORMATS{$output_format};
+
+my $spec_file = shift @ARGV;
+
+my $spec_text = Net::HTTP::Spore::_read_spec($spec_file);
+my $spec = JSON::decode_json($spec_text);
+my $methods = $spec->{methods};
+
+unless (@ARGV) {
+    foreach my $meth (sort keys %{$methods}) {
+	my $m = $methods->{$meth};
+	print join(" ", $meth,
+	    (defined $m->{required_params} ? (map { "--$_=..." } @{$m->{required_params}}) : () ),
+	    (defined $m->{required_params} ? (map { "[--$_=...]" } @{$m->{optional_params}}) : () )
+	    ),
+	    "\n";
+    }
+    exit 1;
+}
+
+my $method = shift @ARGV;
+my $method_spec;
+unless (defined($method_spec = $spec->{methods}{$method})) {
+    die "method $method does not exists\n"
+}
+my ($req, $opt, $flags) = method_to_getopt($method_spec);
+
+GetOptions(%$flags) or exit 1;
+
+my @missing = grep { ! defined $req->{$_} } keys %$req;
+if (@missing) {
+    die "missing required params: ".join(', ', @missing)."\n";
+}
+
+my %API_OUTPUT_FORMATS = (
+    xml =>  'Format::XML',
+    json => 'Format::JSON',
+);
+
+foreach my $fmt (map { lc } @{$spec->{formats}}) {
+    if (exists $API_OUTPUT_FORMATS{$fmt}) {
+	push @middlewares, [ $API_OUTPUT_FORMATS{$fmt} ];
+	last;
+    }
+}
+
+
+my $spore = Net::HTTP::Spore->new_from_string($spec_text, @spore_options);
+$spore->enable(@$_) for @middlewares;
+my $resp = $spore->$method(%$req, map { ($_ => $opt->{$_}) } grep { defined $opt->{$_} } keys %$opt);
+
+# TODO check expected_status
+if ($resp->is_success) {
+    if ($resp->code ~~ @{$method_spec->{expected_status}}) {
+	print $OUTPUT_FORMATS{$output_format}->($resp->body);
+	exit 0;
+    } else {
+	exit 1;
+    }
+}
+
+__END__
+
+=head1 NAME
+
+spore - A command-line client for web services using SPORE descriptions
+
+=head1 SYNOPSIS
+
+    spore [--json|--yaml] SPORE-spec method --arg1=value1 --arg2=value2 ...
+
+Examples, using 'velib.spore', a SPORE API spec file for the VE<eacute>lib'
+service (shared bikes system in Paris, France):
+
+    spore --json velib.spore list
+    spore --json velib.spore detail --station=1001
+
+=head1 DESCRIPTION
+
+TODO
+
+
+
+=cut
+
