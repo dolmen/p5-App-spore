@@ -9,7 +9,7 @@ use Net::HTTP::Spore;
 use JSON;
 
 use ARGV::ENV 'SPORE_OPTS';
-use Getopt::Long qw<:config require_order auto_version>;
+use Getopt::Long qw<:config require_order auto_version bundling>;
 
 
 sub method_to_getopt
@@ -48,6 +48,17 @@ GetOptions(
     #'xml' => sub { $output_format = 'XML' },
     'F|format' => \$output_format,
     #'c|cache' => \$use_cache,
+    'm=s'  => sub {
+	my ($mw, $args) = $_[1] =~ m/^([^=]*)=(.*)$/;
+	unless ($mw) {
+	    push @middlewares, [ $_[1] ];
+	    return
+	}
+	eval {
+	    $args = JSON::decode_json($args);
+	} or die "can't decode JSON for middleware $mw: $@";
+	push @middlewares, [ $mw, ref $args eq 'ARRAY' ? @$args : %$args ];
+    },
 ) && @ARGV or do {
     require Pod::Usage;
     Pod::Usage::pod2usage(1);
@@ -122,19 +133,93 @@ spore - A command-line client for web services using SPORE descriptions
 
 =head1 SYNOPSIS
 
-    spore [--json|--yaml] SPORE-spec method --arg1=value1 --arg2=value2 ...
-
-Examples, using 'velib.spore', a SPORE API spec file for the VE<eacute>lib'
-service (shared bikes system in Paris, France):
-
-    spore --json velib.spore list
-    spore --json velib.spore detail --station=1001
+  spore <SPORE-spec> method
+  spore [--json|--yaml] -mMiddleware[=args-as-json] <SPORE-spec>
+      method --arg1=value1 --arg2=value2 ...
 
 =head1 DESCRIPTION
 
-TODO
+C<spore> provides a command-line interface to any web service for which a SPORE
+API description exists (if it doesn't, just create it, that's easy).
 
+=head1 OPTIONS
 
+=over 4
+
+=item C<--json>
+
+Select JSON as the output format.
+
+=item C<--yaml>
+
+Select YAML as the output format.
+
+=item C<-mI<Middleware>[=I<args-as-JSON>]>
+
+Enable the given I<Middleware> with its args passed as a JSON string. The top
+level array/object will be expanded.
+
+=back
+
+Any argument given after the method name will be matched against the list of
+parameters (required, optional) specified in the given SPORE API description.
+
+=head1 EXAMPLES
+
+Using 'velib.spore', a SPORE API spec file for the VE<eacute>lib'
+service (shared bikes system in Paris, France):
+
+=over 4
+
+=item *
+
+Show the available methods (no network access):
+
+    spore velib.spore
+
+=item *
+
+Call the C<list> method using YAML for output:
+
+    spore velib.spore list
+
+=item *
+
+Call the C<detail> method with the C<station> parameter set to C<1001>, and get
+the result as JSON:
+
+    spore --json velib.spore detail --station=1001
+
+=back
+
+=head1 SEE ALSO
+
+=over 4
+
+=item *
+
+L<Net::HTTP::Spore>
+
+=item *
+
+Some APIs descriptions: L<https://github.com/SPORE/api-description>
+
+=item *
+
+The SPORE specification: L<https://github.com/SPORE>
+
+=back
+
+=head1 AUTHOR
+
+Olivier MenguE<eacute>, L<mailto:dolmen@cpan.org>.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright E<copy> 2011 Olivier MenguE<eacute>.
+
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
 
 =cut
 
