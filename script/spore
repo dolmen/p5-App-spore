@@ -21,10 +21,6 @@ my $locale_encoding = eval {
 
 $_ = decode($locale_encoding, $_) for @ARGV;
 
-# Use the locale encoding for terminal output, but UTF-8
-# for streamed output
-binmode STDOUT, ( -t STDOUT ? ":encoding($locale_encoding)" : ':utf8');
-binmode STDERR, ":encoding($locale_encoding)";
 
 
 sub method_to_getopt
@@ -45,15 +41,20 @@ sub method_to_getopt
     return \%req, \%opt, \%flags
 }
 
-my %OUTPUT_FORMATS = (
-    YAML => sub { require YAML::Tiny; YAML::Tiny::Dump(shift) },
-    JSON => sub { JSON->new->pretty->encode(shift) },
-);
-
-
 
 my $output_format = 'YAML';  # Human readable by default
+my $output_for_human = -t STDOUT;  # Readable encoding by default
 my ($use_cache, @spore_options, @middlewares);
+
+my %OUTPUT_FORMATS = (
+    YAML => sub { require YAML::Tiny; YAML::Tiny::Dump(shift) },
+    JSON => sub {
+	my $json = JSON->new;
+	$json->canonical->pretty if $output_for_human;
+	$json->encode(shift)
+    },
+);
+
 
 # Parse global options
 GetOptions(
@@ -61,6 +62,7 @@ GetOptions(
     'json' => sub { $output_format = 'JSON' },
     'yaml' => sub { $output_format = 'YAML' },
     #'xml' => sub { $output_format = 'XML' },
+    'human' => sub { $output_for_human = 1 },
     'F|format' => \$output_format,
     #'c|cache' => \$use_cache,
     'm=s'  => sub {
@@ -78,6 +80,11 @@ GetOptions(
     require Pod::Usage;
     Pod::Usage::pod2usage(1);
 };
+
+# Use the locale encoding for terminal output, but UTF-8
+# for streamed output
+binmode STDOUT, ( $output_for_human ? ":encoding($locale_encoding)" : ':utf8');
+binmode STDERR, ":encoding($locale_encoding)";
 
 die "invalid format '$output_format'" unless exists $OUTPUT_FORMATS{$output_format};
 
@@ -160,6 +167,27 @@ API description exists (if it doesn't, just create it, that's easy).
 =head1 OPTIONS
 
 =over 4
+
+=item C<--human>
+
+Select a human readable output:
+
+=over 4
+
+=item *
+
+use the locale encoding based on the environment (LANG, LC_ALL... on POSIX).
+
+=item *
+
+use readable output for the serializer (for example JSON->pretty).
+
+=back
+
+This option is enabled by default if the standard output is detected to be a
+terminal.
+
+Use this option explicitely if you want to pipe the output to a pager.
 
 =item C<--json>
 
