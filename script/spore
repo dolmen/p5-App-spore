@@ -10,6 +10,21 @@ use JSON;
 
 use ARGV::ENV 'SPORE_OPTS';
 use Getopt::Long qw<:config require_order auto_version bundling>;
+use Encode;
+
+my $locale_encoding = eval {
+    # TODO check that this works on Win32
+    # (If not, use the OEM CP if -t STDIN, else the ANSI CP)
+    require encoding;
+    encoding::_get_locale_encoding();
+} || 'utf8';
+
+$_ = decode($locale_encoding, $_) for @ARGV;
+
+# Use the locale encoding for terminal output, but UTF-8
+# for streamed output
+binmode STDOUT, ( -t STDOUT ? ":encoding($locale_encoding)" : ':utf8');
+binmode STDERR, ":encoding($locale_encoding)";
 
 
 sub method_to_getopt
